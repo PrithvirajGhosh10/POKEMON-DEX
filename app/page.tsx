@@ -1,69 +1,294 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import Link from "next/link";
+
+type Pokemon = { //pokemon object   //type define structure
+  id: number;
+  name: string;
+  sprites: {
+    front_default: string;
+  };
+  types: {
+    type: {
+      name: string;   //multiple types
+    };
+  }[];
+};
+
+type PokemonListItem = {  // describe item from api list
+  name: string;
+  url: string;
+};
+
+export default function Home() {   //home page
+  const [pokemon, setPokemon] = useState<Pokemon[]>([]);  //current data//finction to change the type
+  const [search, setSearch] = useState(""); //store what user scarch in text box/scarch box
+  const [debouncedSearch,setDebouncedSearch]=useState("");
+  const [type, setType] = useState("");     //store selected pokemon type
+  const [page, setPage] = useState(0);      
+  const [totalResults, setTotalResults] = useState(0);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  useEffect(()=>{
+    const timer = setTimeout(()=>{
+      setDebouncedSearch(search);
+    },5000);
+    return()=> clearTimeout(timer);
+  },[search]);
+
+  const limit = 20;
+
+  useEffect(() => {
+    async function getPokemon() {
+      try {
+        setLoading(true);
+        setError("");
+
+        /*
+          GET ALL POKEMON NAMES + IDS
+        */
+        const listResponse = await fetch(
+          "https://pokeapi.co/api/v2/pokemon?limit=2000"
+        );
+
+        if (!listResponse.ok) {
+          throw new Error("Failed to fetch Pokémon");
+        }
+
+        const listData = await listResponse.json();
+
+        let results: PokemonListItem[] = listData.results;
+
+        /*
+          SEARCH BY NAME OR ID
+        */
+        if (debouncedSearch.trim() !== "") {
+          const searchValue = debouncedSearch.trim().toLowerCase();
+
+          results = results.filter((p: PokemonListItem, index: number) => {  //filter satisfries condition
+            const id = index + 1;    //position
+
+            return (
+              p.name.includes(searchValue) ||  //includes checks an array or string contains a particular value
+              id.toString() === searchValue     //tostring converts the num into str
+            );
+          });
+        }
+
+        /*
+          FILTER BY TYPE
+          This checks ALL Pokémon, not only the current page.
+        */
+        if (type !== "") {
+          const typeResponse = await fetch(
+            `https://pokeapi.co/api/v2/type/${type}`
+          );
+
+          if (!typeResponse.ok) {  //.ok http request is successful
+            throw new Error("Failed to fetch Pokémon type");
+          }
+
+          const typeData = await typeResponse.json();
+
+          const typePokemonNames = new Set(
+            typeData.pokemon.map(
+              (item: {
+                pokemon: PokemonListItem;
+              }) => item.pokemon.name
+            )
+          );
+
+          results = results.filter((p) =>
+            typePokemonNames.has(p.name)
+          );
+        }
+
+        /*
+          TOTAL NUMBER OF RESULTS
+        */
+        setTotalResults(results.length);
+
+        /*
+          PAGINATION
+          Only load 20 Pokémon at a time.
+        */
+        const start = page * limit;
+        const end = start + limit;
+
+        const pageResults = results.slice(start, end);
+
+        /*
+          GET DETAILS FOR CURRENT 20 POKEMON
+        */
+        const details = await Promise.all(
+          pageResults.map(async (p: PokemonListItem) => {
+            const response = await fetch(p.url);
+
+            if (!response.ok) {
+              throw new Error("Failed to fetch Pokémon details");
+            }
+
+            return response.json();
+          })
+        );
+
+        setPokemon(details);
+      } catch {
+        setPokemon([]);
+        setTotalResults(0);
+        setError("Failed to load Pokémon. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    getPokemon();
+  }, [page, search, type]);
+
+  /*
+    WHEN SEARCH OR TYPE CHANGES,
+    RETURN TO PAGE 1
+  */
+  function handleSearch(value: string) {
+    setSearch(value);
+    setPage(0);
+  }
+
+  function handleType(value: string) {
+    setType(value);
+    setPage(0);
+  }
+
+  const totalPages = Math.ceil(totalResults / limit);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main className="min-h-screen bg-gray-100 p-8">
+
+      {/* Heading */}
+      <h1 className="text-4xl font-bold text-center mb-8">
+        Pokemon Dex
+      </h1>
+
+      {/* Search */}
+      <input
+        type="text"
+        placeholder="Search by name or ID"
+        value={search}
+        onChange={(e) => handleSearch(e.target.value)}
+        className="block w-full max-w-md mx-auto mb-4 p-3 border rounded-lg"
+      />
+
+      {/* Type Filter */}
+      <select
+        value={type}
+        onChange={(e) => handleType(e.target.value)}
+        className="block w-full max-w-md mx-auto mb-8 p-3 border rounded-lg"
+      >
+        <option value="">All Types</option>
+        <option value="normal">Normal</option>
+        <option value="fire">Fire</option>
+        <option value="water">Water</option>
+        <option value="electric">Electric</option>
+        <option value="grass">Grass</option>
+        <option value="ice">Ice</option>
+        <option value="fighting">Fighting</option>
+        <option value="poison">Poison</option>
+        <option value="ground">Ground</option>
+        <option value="flying">Flying</option>
+        <option value="psychic">Psychic</option>
+        <option value="bug">Bug</option>
+        <option value="rock">Rock</option>
+        <option value="ghost">Ghost</option>
+        <option value="dragon">Dragon</option>
+        <option value="dark">Dark</option>
+        <option value="steel">Steel</option>
+        <option value="fairy">Fairy</option>
+      </select>
+
+      {/* Loading */}
+      {loading && (
+        <div className="text-center text-xl font-bold mb-6">
+          Loading Pokemon...
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="text-center text-red-500 font-bold mb-6">
+          {error}
+        </div>
+      )}
+
+      {/* Pokémon Cards */}
+      {!loading && !error && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+
+          {pokemon.map((p) => (
+            <Link
+              href={`/pokemon/${p.id}`}
+              key={p.id}
+              className="bg-white p-4 rounded-lg shadow text-center hover:shadow-lg"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              <img
+                src={p.sprites.front_default}
+                alt={p.name}
+                className="mx-auto"
+              />
+
+              <h2 className="text-xl font-bold capitalize">
+                {p.name}
+              </h2>
+
+              <p>ID: #{p.id}</p>
+
+              <p className="capitalize text-gray-500">
+                {p.types
+                  .map((t) => t.type.name)
+                  .join(", ")}
+              </p>
+            </Link>
+          ))}
+
+        </div>
+      )}
+
+      {/* No Results */}
+      {!loading &&
+        !error &&
+        pokemon.length === 0 && (
+          <p className="text-center text-gray-500 mt-8">
+            No Pokemon found.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        )}
+
+      {/* Pagination */}
+      {!loading && totalResults > 0 && (
+        <div className="flex justify-center items-center gap-4 mt-8">
+
+          <button
+            onClick={() => setPage(page - 1)}
+            disabled={page === 0}
+            className="bg-blue-500 text-white px-5 py-2 rounded disabled:bg-gray-400"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            Previous
+          </button>
+
+          <span className="px-5 py-2">
+            Page {page + 1} of {totalPages}
+          </span>
+
+          <button
+            onClick={() => setPage(page + 1)}
+            disabled={page >= totalPages - 1}
+            className="bg-blue-500 text-white px-5 py-2 rounded disabled:bg-gray-400"
           >
-            Documentation
-          </a>
+            Next
+          </button>
+
         </div>
-      </main>
-    </div>
+      )}
+
+    </main>
   );
 }
